@@ -70,6 +70,57 @@ def create_session_entry(session_id: str, project_dir: Path, project_path: str) 
     }
 
 
+def discover_sessions(project_dir: Path) -> list[dict]:
+    """Discover all sessions in a project directory.
+
+    Merges sessions from sessions-index.json with any .jsonl files
+    not listed in the index.
+    """
+    index = load_sessions_index(project_dir)
+    sessions = list(index.get("entries", []))
+    indexed_ids = {s.get("sessionId") for s in sessions}
+
+    # Find .jsonl files not in the index
+    for jsonl_file in project_dir.glob("*.jsonl"):
+        session_id = jsonl_file.stem
+        if session_id == "sessions-index":
+            continue
+        if session_id in indexed_ids:
+            continue
+
+        # Extract first user message as summary
+        first_prompt = ""
+        modified = ""
+        try:
+            with open(jsonl_file, "r") as f:
+                for line in f:
+                    entry = json.loads(line)
+                    msg = entry.get("message", {})
+                    if msg.get("role") == "user":
+                        content = msg.get("content", "")
+                        if isinstance(content, str):
+                            first_prompt = content[:80]
+                        elif isinstance(content, list):
+                            for c in content:
+                                if isinstance(c, dict) and c.get("type") == "text":
+                                    first_prompt = c["text"][:80]
+                                    break
+                        break
+            modified = datetime.fromtimestamp(jsonl_file.stat().st_mtime).isoformat()
+        except Exception:
+            modified = "unknown"
+
+        sessions.append({
+            "sessionId": session_id,
+            "firstPrompt": first_prompt or "No summary",
+            "modified": modified,
+            "fullPath": str(jsonl_file),
+            "_unindexed": True,
+        })
+
+    return sessions
+
+
 def list_sessions(project_path: str, verbose: bool = False) -> None:
     """List all sessions in a project."""
     project_dir = get_project_dir(project_path)
@@ -78,8 +129,7 @@ def list_sessions(project_path: str, verbose: bool = False) -> None:
         print(f"Error: Project directory does not exist: {project_dir}")
         sys.exit(1)
 
-    index = load_sessions_index(project_dir)
-    sessions = index.get("entries", [])
+    sessions = discover_sessions(project_dir)
 
     if not sessions:
         print(f"No sessions found in project: {project_path}")
@@ -92,6 +142,7 @@ def list_sessions(project_path: str, verbose: bool = False) -> None:
         session_id = session.get("sessionId", "unknown")
         summary = session.get("summary") or session.get("firstPrompt", "No summary")[:60]
         modified = session.get("modified", "unknown")
+        unindexed = session.get("_unindexed", False)
 
         # Check if JSONL file exists
         jsonl_path = project_dir / f"{session_id}.jsonl"
@@ -107,6 +158,8 @@ def list_sessions(project_path: str, verbose: bool = False) -> None:
         if verbose:
             print(f"    JSONL exists: {jsonl_exists}")
             print(f"    Subdir exists: {subdir_exists}")
+            if unindexed:
+                print(f"    (not in sessions-index.json)")
         print()
 
 

@@ -34,8 +34,42 @@ get_projects() {
         index_file="$dir/sessions-index.json"
         if [ -f "$index_file" ]; then
             original_path=$(python3 -c "import json; print(json.load(open('$index_file')).get('originalPath', 'Unknown'))" 2>/dev/null || echo "Unknown")
-            session_count=$(python3 -c "import json; print(len(json.load(open('$index_file')).get('entries', [])))" 2>/dev/null || echo "0")
+            # Count indexed sessions + unindexed .jsonl files
+            session_count=$(python3 -c "
+import json, glob, os
+idx = json.load(open('$index_file'))
+indexed = set(e.get('sessionId','') for e in idx.get('entries', []))
+jsonl_ids = set(os.path.splitext(os.path.basename(f))[0] for f in glob.glob('${dir}*.jsonl'))
+print(len(indexed | jsonl_ids))
+" 2>/dev/null || echo "0")
             echo "$original_path|$session_count|$dir"
+        else
+            # No index file - check for .jsonl files directly
+            jsonl_count=$(ls "$dir"*.jsonl 2>/dev/null | wc -l | tr -d ' ')
+            if [ "$jsonl_count" -gt 0 ]; then
+                # Derive original path from .jsonl cwd field
+                original_path=$(python3 -c "
+import os, json, glob
+# Try to read cwd from first .jsonl file
+jsonl_files = sorted(glob.glob('${dir}*.jsonl'), key=os.path.getmtime, reverse=True)
+for jf in jsonl_files:
+    try:
+        with open(jf) as f:
+            for line in f:
+                d = json.loads(line)
+                cwd = d.get('cwd', '')
+                if cwd:
+                    print(cwd)
+                    raise SystemExit(0)
+    except SystemExit:
+        raise
+    except:
+        continue
+# Fallback: show directory basename
+print(os.path.basename('${dir%/}'))
+" 2>/dev/null || echo "${dir%/}")
+                echo "$original_path|$jsonl_count|$dir"
+            fi
         fi
     done
 }
@@ -45,18 +79,56 @@ get_sessions() {
     local project_dir="$1"
     local index_file="$project_dir/sessions-index.json"
 
-    if [ -f "$index_file" ]; then
-        python3 -c "
-import json
-data = json.load(open('$index_file'))
-for entry in data.get('entries', []):
-    sid = entry.get('sessionId', 'unknown')
-    # Use firstPrompt as the title/summary
-    title = entry.get('firstPrompt', 'No title')[:50].replace('|', ' ')
-    modified = entry.get('modified', 'unknown')[:10]
+    python3 -c "
+import json, glob, os
+from datetime import datetime
+
+project_dir = '$project_dir'
+index_file = '$index_file'
+
+seen = set()
+sessions = []
+
+# Read from index if available
+if os.path.isfile(index_file):
+    data = json.load(open(index_file))
+    for entry in data.get('entries', []):
+        sid = entry.get('sessionId', 'unknown')
+        title = (entry.get('summary') or entry.get('firstPrompt', 'No title'))[:50].replace('|', ' ')
+        modified = entry.get('modified', 'unknown')[:10]
+        sessions.append((sid, title, modified))
+        seen.add(sid)
+
+# Discover unindexed .jsonl files
+for jsonl_path in glob.glob(os.path.join(project_dir, '*.jsonl')):
+    sid = os.path.splitext(os.path.basename(jsonl_path))[0]
+    if sid in seen:
+        continue
+    # Extract first user message
+    title = 'No title'
+    try:
+        with open(jsonl_path) as f:
+            for line in f:
+                d = json.loads(line)
+                msg = d.get('message', {})
+                if msg.get('role') == 'user':
+                    content = msg.get('content', '')
+                    if isinstance(content, str):
+                        title = content[:50].replace('|', ' ')
+                    elif isinstance(content, list):
+                        for c in content:
+                            if isinstance(c, dict) and c.get('type') == 'text':
+                                title = c['text'][:50].replace('|', ' ')
+                                break
+                    break
+    except:
+        pass
+    modified = datetime.fromtimestamp(os.path.getmtime(jsonl_path)).strftime('%Y-%m-%d')
+    sessions.append((sid, title, modified))
+
+for sid, title, modified in sessions:
     print(f'{sid}|{title}|{modified}')
 " 2>/dev/null
-    fi
 }
 
 # Simple menu selection (fallback when fzf not available)
