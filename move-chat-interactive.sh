@@ -305,6 +305,13 @@ main() {
         exit 0
     fi
 
+    # Clear interactive selection output for a clean result
+    clear
+
+    echo "${YELLOW}=== Migration Summary ===${NC}"
+    echo "  Session: ${CYAN}$selected_session${NC}"
+    echo "  From:    ${CYAN}$source_path${NC}"
+    echo "  To:      ${CYAN}$dest_path${NC}"
     echo ""
     echo "${BLUE}Executing migration...${NC}"
     echo ""
