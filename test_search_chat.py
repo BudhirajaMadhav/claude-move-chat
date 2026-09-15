@@ -3,8 +3,10 @@
 
 import importlib.util
 from datetime import datetime, timedelta
+from pathlib import Path
 
-spec = importlib.util.spec_from_file_location("search_chat", "search-chat.py")
+TARGET = Path(__file__).resolve().parent / "search-chat.py"
+spec = importlib.util.spec_from_file_location("search_chat", TARGET)
 sc = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sc)
 
