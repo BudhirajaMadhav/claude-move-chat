@@ -38,7 +38,7 @@ if [ $# -eq 0 ]; then
 
     if command -v fzf &> /dev/null; then
         echo "${BLUE}Tip: Pipe to fzf for interactive filtering:${NC}"
-        echo "  claude-search-chat --fzf <query> | fzf --delimiter='\t' --with-nth=1..4"
+        echo "  claude-search-chat --fzf <query> | fzf --delimiter='\t' --with-nth=1..5"
     fi
     exit 0
 fi

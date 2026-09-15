@@ -58,15 +58,17 @@ claude-search-chat -r "PR #\d+" -n 10
 claude-search-chat -s "MyClassName"
 ```
 
-Results include session IDs for resuming:
+Results include the date of each match (in IST) and session IDs for resuming:
 
 ```
 ~/Developer/my-project
   Fix authentication flow
-  Session: 7e9ce563-ff99-4897-970b-8d37f216e90e
+  Session: 7e9ce563-ff99-4897-970b-8d37f216e90e  (2d ago)
 
-  [user] implement OAuth error handling...
+  2026-09-13 18:42 IST [user] implement OAuth error handling...
 ```
+
+Session logs store timestamps in UTC; the output converts them to IST.
 
 Resume with: `claude --resume 7e9ce563-ff99-4897-970b-8d37f216e90e`
 

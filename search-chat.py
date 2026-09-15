@@ -12,11 +12,64 @@ import os
 import re
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 CLAUDE_DIR = Path.home() / ".claude"
 PROJECTS_DIR = CLAUDE_DIR / "projects"
+
+# Session logs store UTC; display in IST.
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def parse_timestamp(raw: str) -> datetime:
+    """Parse an ISO-8601 UTC timestamp from a session log into IST.
+
+    Returns None when the timestamp is absent or unparseable.
+    """
+    if not raw:
+        return None
+    try:
+        # Python < 3.11 cannot read the trailing "Z".
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(IST)
+
+
+def format_timestamp(raw: str) -> str:
+    """Render a session-log timestamp as an IST date and time. Empty if unknown."""
+    dt = parse_timestamp(raw)
+    return dt.strftime("%Y-%m-%d %H:%M") if dt else ""
+
+
+def relative_time(dt: datetime) -> str:
+    """Convert a datetime to a human-readable relative time string."""
+    now = datetime.now(IST)
+    diff = now - dt
+    seconds = int(diff.total_seconds())
+
+    if seconds < 60:
+        return "just now"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}h ago"
+    days = hours // 24
+    if days < 7:
+        return f"{days}d ago"
+    weeks = days // 7
+    if weeks < 5:
+        return f"{weeks}w ago"
+    months = days // 30
+    if months < 12:
+        return f"{months}mo ago"
+    years = days // 365
+    return f"{years}y ago"
 
 
 def get_project_original_path(project_dir: Path) -> str:
@@ -241,7 +294,9 @@ def format_results(results: list, verbose: bool = False) -> str:
         lines.append(f"\033[1;34m{short_project}\033[0m")
         if title:
             lines.append(f"  \033[1;33m{title}\033[0m")
-        lines.append(f"  \033[0;35mSession: {session_id}\033[0m")
+        newest = parse_timestamp(matches[0].get("timestamp", ""))
+        age = f"  ({relative_time(newest)})" if newest else ""
+        lines.append(f"  \033[0;35mSession: {session_id}\033[0m\033[0;90m{age}\033[0m")
         lines.append("")
 
         for m in matches:
@@ -249,7 +304,9 @@ def format_results(results: list, verbose: bool = False) -> str:
             role_label = m["role"]
             snippet = m["snippet"]
 
-            lines.append(f"  {role_color}[{role_label}]\033[0m {snippet}")
+            when = format_timestamp(m.get("timestamp", ""))
+            stamp = f"\033[0;90m{when} IST\033[0m " if when else ""
+            lines.append(f"  {stamp}{role_color}[{role_label}]\033[0m {snippet}")
 
         lines.append("")
 
@@ -267,8 +324,10 @@ def format_for_fzf(results: list) -> str:
         role = r["role"]
         snippet = r["snippet"][:200]
 
-        # Format: project | title | role | snippet | session_id
-        line = f"{short_project}\t{title[:50]}\t{role}\t{snippet}\t{r['session_id']}"
+        when = format_timestamp(r.get("timestamp", ""))
+
+        # Format: project | date | title | role | snippet | session_id
+        line = f"{short_project}\t{when}\t{title[:50]}\t{role}\t{snippet}\t{r['session_id']}"
         lines.append(line)
     return "\n".join(lines)
 
